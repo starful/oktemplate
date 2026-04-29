@@ -271,10 +271,14 @@ footer {
    ========================================= */
 @media (max-width: 768px) {
     .header-top { height: 65px; }
-    .logo-img { height: 55px; }
+    .logo-img { height: 52px; max-width: 58vw; object-fit: contain; }
     .detail-title { font-size: 1.5rem; }
     .map-section { height: 45vh; min-height: 280px; }
     .onsen-grid { grid-template-columns: 1fr; }
     .content-wrapper { margin-top: -20px; padding: 0 15px 40px; }
     .guide-section-title { font-size: 1.4rem; }
+}
+
+@media (max-width: 480px) {
+    .logo-img { height: 44px; max-width: 70vw; }
 }
