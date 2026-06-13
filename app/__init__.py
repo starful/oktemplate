@@ -1,7 +1,8 @@
 from flask import Flask, jsonify, render_template, abort, redirect, request, Response, send_from_directory
 from flask_compress import Compress
-import json, os, frontmatter, markdown, re, glob, hashlib, copy, urllib.parse
+import json, os, frontmatter, markdown, re, glob, hashlib, copy, urllib.parse, urllib.request, io
 from datetime import datetime
+from urllib.parse import quote
 
 app = Flask(__name__)
 Compress(app)
@@ -21,6 +22,10 @@ except ImportError:
 
 app.register_blueprint(reactions_bp)
 
+SITE_URL = SITE_CONFIG['site_url'].rstrip('/')
+GCS_PREFIX = SITE_CONFIG['project_name']
+SUPPORTED_LANGS = {'en', 'ko'}
+
 # ==========================================
 # Paths
 # ==========================================
@@ -30,14 +35,98 @@ DATA_FILE   = os.path.join(STATIC_DIR, 'json', 'items_data.json')
 CONTENT_DIR = os.path.join(BASE_DIR, 'content')
 GUIDE_DIR   = os.path.join(CONTENT_DIR, 'guides')
 
-# ==========================================
-# Image mapping helpers
-# ==========================================
 GUIDE_IMAGES = SITE_CONFIG['guide_images']
+
 
 def get_mapped_image(base_id):
     idx = int(hashlib.md5(base_id.encode()).hexdigest(), 16) % len(GUIDE_IMAGES)
     return GUIDE_IMAGES[idx]
+
+
+def _gcs_image_url(filename):
+    return f"https://storage.googleapis.com/ok-project-assets/{GCS_PREFIX}/{filename}"
+
+
+def _social_image_url(base_id):
+    safe = re.sub(r"[^a-z0-9_-]", "", base_id.lower())
+    return f"{SITE_URL}/social/{safe}.jpg"
+
+
+def _og_image_context(base_id):
+    return {
+        "og_image_abs": _social_image_url(base_id),
+        "og_image_width": 1200,
+        "og_image_height": 630,
+    }
+
+
+def _card_path(kind, base_id, lang):
+    path = f"/card/{kind}/{base_id}"
+    if lang == 'ko':
+        path += '?lang=ko'
+    return path
+
+
+def _share_context(slug, title, lang, page_path, base_id, kind):
+    share_url = f"{SITE_URL}{page_path}"
+    share_url_x = f"{SITE_URL}{_card_path(kind, base_id, lang)}"
+    site_name = SITE_CONFIG['site_name']
+    if lang == 'ko':
+        share_tweet = f"{title} — {site_name}"
+    else:
+        share_tweet = f"{title} — Japan guide on {site_name}"
+    return {
+        "share_id": slug,
+        "share_url": share_url,
+        "share_url_x": share_url_x,
+        "share_tweet": share_tweet,
+        "share_lang": lang,
+        "og_page_url": share_url,
+        "linkedin_inspector_url": f"https://www.linkedin.com/post-inspector/inspect/{quote(share_url, safe='')}",
+    }
+
+
+def _jpeg_bytes(img):
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=78, optimize=True, progressive=True)
+    return buf.getvalue()
+
+
+def _resolve_item_id(base_id, lang):
+    candidate = f"{base_id}_{lang}"
+    if os.path.exists(os.path.join(CONTENT_DIR, f"{candidate}.md")):
+        return candidate
+    fallback = f"{base_id}_en"
+    if os.path.exists(os.path.join(CONTENT_DIR, f"{fallback}.md")):
+        return fallback
+    return None
+
+
+def _resolve_guide_id(base_id, lang):
+    candidate = f"{base_id}_{lang}"
+    if os.path.exists(os.path.join(GUIDE_DIR, f"{candidate}.md")):
+        return candidate
+    fallback = f"{base_id}_en"
+    if os.path.exists(os.path.join(GUIDE_DIR, f"{fallback}.md")):
+        return fallback
+    return None
+
+
+def _social_source_url(base_id):
+    if os.path.exists(os.path.join(GUIDE_DIR, f"{base_id}_en.md")) or os.path.exists(os.path.join(GUIDE_DIR, f"{base_id}_ko.md")):
+        return get_mapped_image(base_id)
+    return _gcs_image_url(f"{base_id}.jpg")
+
+
+def _fetch_remote_image(url):
+    try:
+        with urllib.request.urlopen(url, timeout=15) as resp:
+            raw = resp.read()
+            if raw:
+                return raw
+    except Exception:
+        pass
+    return None
 
 # ==========================================
 # Data loading (startup cache)
@@ -205,12 +294,15 @@ def guide_detail(guide_id):
     alt_ko = f"{SITE_CONFIG['site_url']}/guide/{base_id}_ko"
 
     content_html = markdown.markdown(body, extensions=['tables', 'toc', 'fenced_code'])
+    page_path = f"/guide/{guide_id}"
+    share_ctx = _share_context(guide_id, title, lang, page_path, base_id, 'guide')
     return render_template('guide_detail.html',
                            title=title, content=content_html, lang=lang,
                            guide_id=guide_id, base_id=base_id,
                            image_url=image, image_url_abs=_absolute_url(image),
                            canonical=f"{SITE_CONFIG['site_url']}/guide/{guide_id}",
-                           alt_en=alt_en, alt_ko=alt_ko, post=post, **stats)
+                           alt_en=alt_en, alt_ko=alt_ko, post=post,
+                           **_og_image_context(base_id), **share_ctx, **stats)
 
 @app.route('/item/<item_id>')
 def item_detail(item_id):
@@ -227,14 +319,124 @@ def item_detail(item_id):
         post['categories'] = [c.strip() for c in post['categories'].split(',')]
 
     content_html = markdown.markdown(post.content, extensions=['tables', 'fenced_code'])
-    lang  = str(post.get('lang', 'en'))
+    lang = str(post.get('lang', 'en'))
+    base_id = item_id.rsplit('_', 1)[0]
     stats = _get_footer_stats(lang)
+    page_path = f"/item/{item_id}"
+    share_ctx = _share_context(
+        item_id,
+        str(post.get('title', item_id)),
+        lang,
+        page_path,
+        base_id,
+        'item',
+    )
     return render_template(
         'detail.html',
         post=post,
         content=content_html,
+        base_id=base_id,
         thumbnail_abs=_absolute_url(str(post.get('thumbnail', '/static/images/default.jpg'))),
-        **stats
+        **_og_image_context(base_id),
+        **share_ctx,
+        **stats,
+    )
+
+
+@app.route('/social/<slug>.jpg')
+def social_image(slug):
+    """Serve thumbnail on-site for OG/Twitter (1200×630 JPEG, no redirect)."""
+    safe = re.sub(r"[^a-z0-9_-]", "", slug.lower())
+    if not safe:
+        abort(404)
+
+    source_urls = [_social_source_url(safe)]
+    is_guide = os.path.exists(os.path.join(GUIDE_DIR, f"{safe}_en.md")) or os.path.exists(os.path.join(GUIDE_DIR, f"{safe}_ko.md"))
+    if not is_guide:
+        source_urls.append(get_mapped_image(safe))
+
+    raw = None
+    for source_url in source_urls:
+        raw = _fetch_remote_image(source_url)
+        if raw:
+            break
+    if not raw:
+        abort(404)
+
+    try:
+        from PIL import Image, ImageOps
+
+        img = Image.open(io.BytesIO(raw)).convert("RGB")
+        data = _jpeg_bytes(ImageOps.fit(img, (1200, 630), Image.Resampling.LANCZOS))
+    except Exception:
+        data = raw
+
+    return Response(
+        data,
+        mimetype="image/jpeg",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
+@app.route('/card/item/<base_id>')
+def item_social_card(base_id):
+    lang = request.args.get('lang', 'en').strip().lower()
+    if lang not in SUPPORTED_LANGS:
+        lang = 'en'
+    item_id = _resolve_item_id(base_id, lang)
+    if not item_id:
+        abort(404)
+
+    md_path = os.path.join(CONTENT_DIR, f"{item_id}.md")
+    with open(md_path, 'r', encoding='utf-8') as f:
+        post = frontmatter.loads(_clean_md(f.read()))
+
+    title = str(post.get('title', base_id))
+    summary = str(post.get('summary', ''))
+    page_path = f"/item/{item_id}"
+    card_path = _card_path('item', base_id, lang)
+
+    return render_template(
+        'social_card.html',
+        lang=lang,
+        title=title,
+        seo_title=f"{title} - {SITE_CONFIG['site_name']}",
+        seo_desc=summary,
+        site_name=SITE_CONFIG['site_name'],
+        page_url=f"{SITE_URL}{page_path}",
+        card_url=f"{SITE_URL}{card_path}",
+        **_og_image_context(base_id),
+    )
+
+
+@app.route('/card/guide/<base_id>')
+def guide_social_card(base_id):
+    lang = request.args.get('lang', 'en').strip().lower()
+    if lang not in SUPPORTED_LANGS:
+        lang = 'en'
+    guide_id = _resolve_guide_id(base_id, lang)
+    if not guide_id:
+        abort(404)
+
+    md_path = os.path.join(GUIDE_DIR, f"{guide_id}.md")
+    with open(md_path, 'r', encoding='utf-8') as f:
+        post = frontmatter.loads(_clean_md(f.read()))
+
+    title = str(post.get('title', base_id))
+    summary = str(post.get('summary', ''))
+    page_path = f"/guide/{guide_id}"
+    card_path = _card_path('guide', base_id, lang)
+
+    return render_template(
+        'social_card.html',
+        lang=lang,
+        title=title,
+        seo_title=f"{title} - {SITE_CONFIG['site_name']} Guide",
+        seo_desc=summary,
+        site_name=SITE_CONFIG['site_name'],
+        page_url=f"{SITE_URL}{page_path}",
+        card_url=f"{SITE_URL}{card_path}",
+        **_og_image_context(base_id),
     )
 
 # Static assets / SEO
