@@ -14,6 +14,13 @@ try:
 except ImportError:
     from config import SITE_CONFIG
 
+try:
+    from .reactions import reactions_bp
+except ImportError:
+    from reactions import reactions_bp
+
+app.register_blueprint(reactions_bp)
+
 # ==========================================
 # Paths
 # ==========================================
@@ -233,16 +240,16 @@ def item_detail(item_id):
 # Static assets / SEO
 @app.route('/static/images/<path:filename>')
 def serve_images(filename):
+    """이미지는 GCS가 기준 — okadmin 업로드 즉시 반영."""
     image_dir = os.path.join(STATIC_DIR, 'images')
     if any(x in filename for x in ['favicon', 'apple-touch', 'android-chrome']):
         local_path = os.path.join(image_dir, filename)
         if os.path.exists(local_path):
             return send_from_directory(image_dir, filename)
     project_name = SITE_CONFIG['project_name']
-    version = os.environ.get('ASSET_VERSION', '').strip()
     url = f"https://storage.googleapis.com/ok-project-assets/{project_name}/{filename}"
-    if version:
-        url = f"{url}?v={urllib.parse.quote(version)}"
+    if request.query_string:
+        url = f"{url}?{request.query_string.decode()}"
     return redirect(url, code=302)
 
 @app.route('/favicon.ico')

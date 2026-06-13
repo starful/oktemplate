@@ -39,6 +39,23 @@ class ApiSmokeTest(unittest.TestCase):
         self.assertEqual(manifest.status_code, 200)
         self.assertIn("icons", manifest.get_data(as_text=True))
 
+    def test_reactions_api_returns_counts(self):
+        response = self.client.get("/api/reactions/smoke-test-slug")
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertIn("likes", payload)
+        self.assertIn("dislikes", payload)
+
+    def test_item_detail_has_reaction_panel(self):
+        items_resp = self.client.get("/api/items?lang=en")
+        payload = items_resp.get_json()
+        items = payload.get("items") or []
+        self.assertTrue(items)
+        item_id = items[0]["id"]
+        detail = self.client.get(f"/item/{item_id}")
+        self.assertEqual(detail.status_code, 200)
+        self.assertIn(b"reaction-panel", detail.data)
+
 
 if __name__ == "__main__":
     unittest.main()

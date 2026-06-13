@@ -10,7 +10,7 @@ SITE_CONFIG = {
     # ----------------------------------------------------------
     # 1. Basic identity
     # ----------------------------------------------------------
-    "project_name":  "oktemplate",          # GCS prefix / Cloud Run service name
+    "project_name":  "oktemplate",          # GCS prefix / Cloud Run service / Firestore reactions collection
     "site_name":     "OKTemplate",          # Display name (e.g. OKRamen, OKOnsen)
     "site_url":      os.getenv("SITE_URL", "https://oktemplate.net"),
     "tagline":       "Discover the Best of Japan",
