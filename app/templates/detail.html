@@ -94,17 +94,6 @@
             {{ content | safe }}
         </div>
 
-        <!-- Booking block (shown when Agoda link exists) -->
-        {% if post.agoda %}
-        <div class="booking-box">
-            <h3>🏨 Stay Nearby</h3>
-            <p>Find the best hotels near {{ post.address }} for your trip.</p>
-            <a href="{{ post.agoda }}" target="_blank" rel="nofollow" class="booking-btn">
-                Check Hotel Deals on Agoda →
-            </a>
-        </div>
-        {% endif %}
-
         {% include 'partials/share_bar.html' %}
 
         {% with reaction_slug=post.id, reaction_lang=post.lang|default('en') %}
