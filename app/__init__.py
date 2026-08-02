@@ -499,7 +499,7 @@ def sitemap_xml():
     today = datetime.now().strftime('%Y-%m-%d')
 
     url_entries = []
-    static_urls = [f"{base}/", f"{base}/guide", f"{base}/about.html", f"{base}/privacy.html"]
+    static_urls = [f"{base}/", f"{base}/guide", f"{base}/about.html", f"{base}/contact.html", f"{base}/privacy.html"]
     for url in static_urls:
         url_entries.append({"loc": url, "alternates": {}})
 
@@ -563,6 +563,11 @@ def about():
 @app.route('/privacy.html')
 def privacy():
     return render_template('privacy.html', site=SITE_CONFIG)
+
+@app.route('/contact.html')
+@app.route('/contact')
+def contact():
+    return render_template('contact.html', site=SITE_CONFIG)
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))
